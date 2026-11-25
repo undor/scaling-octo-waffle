@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>POC to production: an ADR flow, step by step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0A0F24; --bg2:#0F1630; --panel:#121A3A; --panel2:#171F45; --line:#26316A; --line2:#1C2552;
+  --text:#E6E9F7; --muted:#8F98C4; --dim:#69729F; --accent:#B9A4FF; --accent2:#8E73F0;
+  --green:#5BD6A0; --red:#FF7B8A; --amber:#FFC857;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+body.bad{--accent:#FFA26B; --accent2:#E5733A}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--sans)}
+body{background:radial-gradient(1200px 500px at 20% -10%,#1A1F52 0,transparent 60%),var(--bg)}
+code,pre,.mono{font-family:var(--mono)}
+button{font:inherit;color:inherit;cursor:pointer}
+#app{display:flex;flex-direction:column;height:100vh;min-height:0}
+
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px 4px}
+header h1{margin:0;font-size:17px;font-weight:600;letter-spacing:.1px}
+header h1 small{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:1px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--bg2);flex:none}
+.seg button{border:0;background:transparent;padding:5px 12px;border-radius:999px;font-size:12.5px;color:var(--muted)}
+.seg button[aria-pressed=true]{background:var(--accent);color:#14102B;font-weight:600}
+
+#timeline{display:flex;gap:6px;padding:4px 16px 6px}
+.phase{display:flex;flex-direction:column;gap:3px;min-width:0}
+.phase .pl{font:600 10px/1 var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.phase.cur .pl{color:var(--accent)}
+.phase .bar{display:flex;gap:3px}
+.dot{flex:1;min-width:18px;height:22px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--dim);font:500 11px var(--mono);padding:0}
+.dot.past{background:#2A2F63;color:#B8BEE6;border-color:#2A2F63}
+.dot.cur{background:var(--accent);color:#14102B;border-color:var(--accent);font-weight:700}
+.dot:hover{border-color:var(--accent)}
+.dot:focus-visible,.seg button:focus-visible,.nav button:focus-visible,.tab:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+#caption{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;padding:6px 16px 8px}
+#caption .l{min-width:0}
+#caption .t{font-weight:600;font-size:15px}
+#caption .t .ph{font:600 11px var(--mono);color:var(--accent);letter-spacing:.8px;text-transform:uppercase;margin-right:8px}
+#caption .n{margin-top:2px;color:#CBD0EE;font-size:13.5px}
+#caption .n b{color:var(--accent);font-weight:600}
+#chips{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end;max-width:40%}
+.chip{font:500 11px var(--mono);padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.chip.add{color:var(--green);border-color:#2B5C4B}
+.chip.del{color:var(--red);border-color:#6A3140}
+.chip.chg{color:var(--accent);border-color:#4E4390}
+
+main{flex:1;min-height:0;display:grid;grid-template-columns:.92fr .95fr 1.13fr;gap:10px;padding:0 16px 8px}
+.panel{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative}
+.ph-bar{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);background:var(--panel2);font:600 11px var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--muted);flex:none}
+.ph-bar .sp{flex:1}
+.ph-bar .sub{font-weight:400;text-transform:none;letter-spacing:0;color:var(--dim)}
+.pbody{position:relative;flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:#323C7A transparent}
+
+/* chat */
+#chat{padding:10px;display:flex;flex-direction:column;gap:9px}
+.msg{max-width:94%;padding:8px 11px;border-radius:10px;font-size:13.2px;line-height:1.45;border:1px solid transparent;word-wrap:break-word;overflow-wrap:anywhere}
+.msg.you{align-self:flex-end;background:#2B2870;border-color:#41398F;border-bottom-right-radius:3px}
+.msg.agent{align-self:flex-start;background:#1A2350;border-color:var(--line);border-bottom-left-radius:3px}
+.msg .who{font:600 10px var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--accent);margin-bottom:3px}
+.msg.you .who{color:#C7BCFF;text-align:right}
+.msg.old{opacity:.5}
+.msg.new{box-shadow:0 0 0 1px rgba(185,164,255,.35)}
+.msg code{background:#0C1230;border:1px solid #2A3470;border-radius:4px;padding:0 4px;font-size:12px;color:#D8D0FF}
+.sysmsg{align-self:stretch;text-align:center;font:500 11.5px var(--mono);color:var(--amber);border:1px dashed #6A5A2A;background:rgba(255,200,87,.06);border-radius:8px;padding:7px 10px}
+.chips2{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.fchip{font:11px var(--mono);padding:1px 7px;border-radius:5px;background:#0C1230;border:1px solid #2A3470;color:#AEB7EA}
+.fchip b{color:var(--green);font-weight:600}
+.fchip i{font-style:normal;color:var(--accent)}
+.card{margin-top:8px;border:1px solid var(--line);border-radius:8px;background:#0F1634;padding:8px 9px}
+.card .ct{font-weight:600;font-size:12.5px;margin-bottom:5px}
+.opt{display:flex;gap:7px;align-items:flex-start;padding:4px 7px;border-radius:6px;border:1px solid var(--line2);margin-top:4px;font-size:12.5px;color:var(--muted)}
+.opt .rb{flex:none;width:12px;height:12px;border-radius:50%;border:1.5px solid var(--dim);margin-top:3px}
+.opt.pick{border-color:#5B4CB0;background:rgba(185,164,255,.1);color:var(--text)}
+.opt.pick .rb{border-color:var(--accent);background:radial-gradient(var(--accent) 0 40%,transparent 45%)}
+.card.stop{border-color:#8F3446;background:rgba(255,123,138,.07)}
+.card.stop .ct{color:var(--red);font:700 12px var(--mono);letter-spacing:.6px}
+.card.stop .opt.pick{border-color:var(--red);background:rgba(255,123,138,.1)}
+.card .sm{font-size:12.5px;color:#CBD0EE;margin:3px 0}
+table.t{border-collapse:collapse;width:100%;font-size:12px;margin-top:2px}
+table.t th{font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.6px;color:var(--dim);text-align:left;padding:3px 6px 4px 0;border-bottom:1px solid var(--line)}
+table.t td{vertical-align:top;padding:5px 6px 5px 0;border-bottom:1px solid var(--line2);color:#CBD0EE}
+.find{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--line2);font-size:12.5px}
+.find:last-child{border-bottom:0}
+.sev{flex:none;font:700 10px var(--mono);padding:2px 6px;border-radius:4px;height:fit-content;margin-top:2px}
+.sev.hi{background:rgba(255,123,138,.16);color:var(--red)}
+.sev.md{background:rgba(255,200,87,.16);color:var(--amber)}
+.sev.ok{background:rgba(91,214,160,.15);color:var(--green)}
+.find b{color:var(--text)}
+.prs{margin:4px 0 0;padding:0;list-style:none;font-size:12.5px}
+.prs li{display:flex;gap:8px;padding:3px 0;color:#CBD0EE}
+.prs li span{font:600 11px var(--mono);color:var(--accent);flex:none;width:34px}
+pre.cb{margin:6px 0 0;background:#0A1030;border:1px solid #2A3470;border-radius:7px;padding:7px 9px;font-size:11.5px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;color:#D6DAF5}
+
+/* tabs */
+.tabs{display:flex;flex-wrap:wrap;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--line);background:var(--panel2);flex:none}
+.tab{border:1px solid transparent;border-bottom:0;background:transparent;padding:5px 7px;border-radius:7px 7px 0 0;font:500 11px var(--mono);color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:6px;flex:none}
+.tab[aria-selected=true]{background:var(--panel);border-color:var(--line);color:var(--text);position:relative;top:1px}
+.tab .u{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.tab .s{width:7px;height:7px;border-radius:2px}
+.s.proposed{background:var(--amber)} .s.accepted{background:var(--green)} .s.superseded{background:#7C84AE}
+
+/* docs */
+#docs{padding:10px 12px 14px}
+.empty{color:var(--muted);font-size:13px;padding:22px 14px;text-align:center;line-height:1.6}
+.empty .mono{color:var(--dim);font-size:12px}
+.blk{padding:5px 8px 5px 10px;margin:0 -2px 3px;border-left:3px solid transparent;border-radius:0 6px 6px 0;font-size:13px}
+.blk.chg{border-left-color:var(--accent);background:rgba(185,164,255,.1);animation:flash 1.6s ease-out}
+@keyframes flash{from{background:rgba(185,164,255,.35)}to{background:rgba(185,164,255,.1)}}
+@media (prefers-reduced-motion:reduce){.blk.chg{animation:none}}
+.blk h4{margin:0 0 3px;font:600 10.5px var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+.blk .tag-new{float:right;font:700 9.5px var(--mono);color:var(--accent);letter-spacing:.6px}
+.adr-title{font-size:15px;font-weight:600;line-height:1.3}
+.adr-file{font:11px var(--mono);color:var(--dim);margin-bottom:4px}
+.badge{display:inline-block;font:700 10.5px var(--mono);letter-spacing:.6px;text-transform:uppercase;padding:2px 8px;border-radius:5px;margin-top:6px}
+.badge.proposed{background:rgba(255,200,87,.16);color:var(--amber);border:1px solid #7A6630}
+.badge.accepted{background:rgba(91,214,160,.15);color:var(--green);border:1px solid #2E6B54}
+.badge.superseded{background:rgba(124,132,174,.18);color:#AEB4D6;border:1px solid #4A5280;text-decoration:line-through}
+.badge-note{font:11.5px var(--mono);color:var(--muted);margin-left:8px}
+.adr-title.sup{color:#8D94BD}
+.optrow{display:flex;gap:8px;margin:2px 0}
+.optrow b{flex:none;width:18px;height:18px;border-radius:5px;background:#2A2F63;color:var(--accent);font:700 11px/18px var(--mono);text-align:center}
+ul.l{margin:0;padding:0 0 0 17px} ul.l li{margin:2px 0}
+.ev{display:flex;gap:8px}
+.ev .id{flex:none;font:600 11px var(--mono);color:var(--accent);width:24px;padding-top:1px}
+.ev .tx{min-width:0}
+.ev .meta{font:11px var(--mono);color:var(--dim);margin-top:2px;display:flex;flex-wrap:wrap;gap:5px}
+.pill{padding:0 7px;border-radius:999px;border:1px solid var(--line)}
+.pill.cost{color:var(--amber);border-color:#7A6630;background:rgba(255,200,87,.08)}
+.pill.fa{color:var(--green);border-color:#2E6B54}
+.pill.fb{color:#7FC6FF;border-color:#2F5C84}
+.pill.fn{color:var(--muted)}
+
+/* code */
+#code{padding:0;font-family:var(--mono);font-size:11.8px}
+.fh{display:flex;justify-content:space-between;gap:8px;padding:6px 10px;color:var(--dim);font:11px var(--mono);border-bottom:1px solid var(--line2);position:sticky;top:0;background:var(--panel);z-index:1}
+.fh .a{color:var(--green)} .fh .d{color:var(--red)}
+.ln{display:flex;align-items:flex-start;min-width:0;padding-right:8px;border-left:3px solid transparent}
+.ln .no{flex:none;width:30px;text-align:right;padding:0 6px 0 0;color:#4D568C;user-select:none}
+.ln .mk{flex:none;width:14px;color:var(--dim);user-select:none}
+.ln code{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:inherit;line-height:1.5}
+.ln.add{background:rgba(91,214,160,.11)} .ln.add .mk{color:var(--green)}
+.ln.del{background:rgba(255,123,138,.12)} .ln.del .mk{color:var(--red)} .ln.del code{opacity:.75;text-decoration:line-through;text-decoration-color:rgba(255,123,138,.6)}
+.ln.cost{border-left-color:var(--amber);background:rgba(255,200,87,.17)}
+.ln.cost.add{background:linear-gradient(90deg,rgba(255,200,87,.22),rgba(91,214,160,.1))}
+.ln .ct{flex:none;font:700 9.5px var(--mono);color:var(--amber);letter-spacing:.5px;margin-left:6px;padding-top:2px;white-space:nowrap}
+.tk-k{color:#C792EA}.tk-s{color:#A5E0A0}.tk-c{color:#7C86B8;font-style:italic}.tk-n{color:#F6B26B}.tk-f{color:#82AAFF}.tk-h{color:var(--accent);font-weight:600}
+.cfoot{display:flex;align-items:center;gap:10px;padding:6px 10px;border-top:1px solid var(--line);background:var(--panel2);font:11.5px var(--mono);flex:none;flex-wrap:wrap}
+.meter{display:flex;align-items:center;gap:7px;color:var(--muted)}
+.meter .bar{width:70px;height:7px;background:#0C1230;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.meter .bar i{display:block;height:100%;background:var(--amber)}
+.meter b{color:var(--amber)}
+.tests{margin-left:auto;padding:1px 8px;border-radius:999px;border:1px solid var(--line)}
+.tests.ok{color:var(--green);border-color:#2E6B54}.tests.bad{color:var(--red);border-color:#8F3446}.tests.warn{color:var(--amber);border-color:#7A6630}
+.veil{position:absolute;inset:34px 0 0 0;background:rgba(10,15,36,.82);display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;color:var(--muted);font-size:13px;z-index:3;backdrop-filter:blur(1.5px)}
+.veil b{display:block;color:var(--text);margin-bottom:4px}
+
+.nav{display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 16px 12px;border-top:1px solid var(--line2);background:rgba(10,15,36,.9)}
+.nav button{border:1px solid var(--line);background:var(--panel2);padding:7px 16px;border-radius:8px;font-weight:600;font-size:13px}
+.nav button.primary{background:var(--accent);border-color:var(--accent);color:#14102B}
+.nav button:disabled{opacity:.35;cursor:default}
+.nav .cnt{font:12px var(--mono);color:var(--muted);min-width:70px;text-align:center}
+.nav .hint{font:11.5px var(--mono);color:var(--dim)}
+
+@media (max-width:1100px){
+  #app{height:auto;min-height:100vh}
+  main{display:flex;flex-direction:column;flex:none}
+  .panel{height:auto}
+  #chatwrap .pbody{max-height:70vh}
+  #docwrap .pbody{max-height:70vh}
+  #codewrap .pbody{max-height:72vh}
+  #chips{max-width:none;justify-content:flex-start}
+  #caption{flex-direction:column;gap:6px}
+  .nav{position:sticky;bottom:0;z-index:10}
+  .nav .hint{display:none}
+}
+@media (max-width:700px){
+  header{flex-direction:column;align-items:flex-start;gap:8px}
+  header h1{font-size:15.5px}
+  .phase .pl{display:none}
+  #timeline{gap:4px;padding-bottom:4px}
+  .phase{flex:none}
+  .phase .bar{gap:2px}
+  .dot{min-width:0;width:22px;flex:none;font-size:10px}
+  #timeline{overflow-x:auto}
+  .msg{max-width:100%}
+}
+
+#docs .ln{font-family:var(--mono);font-size:11.8px}
+#docs .ln.add{background:rgba(91,214,160,.11)}
+
+table.t th:first-child,table.t td:first-child{white-space:nowrap;padding-right:10px}
+.blk{position:relative}
+.blk .tag-new{position:absolute;right:8px;top:6px;float:none}
+.blk.chg:has(.tag-new){padding-right:40px}
+
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>From POC to production: an ADR flow, step by step
+      <small>A fusion pass for a toy graph IR, built with an AI agent. Use ← → keys or the buttons.</small></h1>
+    <div class="seg" role="group" aria-label="Path">
+      <button data-mode="good" aria-pressed="true">With ADRs</button>
+      <button data-mode="bad" aria-pressed="false">Without ADRs</button>
+    </div>
+  </header>
+  <div id="timeline" role="group" aria-label="Steps by phase"></div>
+  <div id="caption"><div class="l" id="cap"></div><div id="chips" aria-label="What changed in this step"></div></div>
+  <main>
+    <section class="panel" id="chatwrap" aria-label="Agent chat">
+      <div class="ph-bar">Agent chat<span class="sp"></span><span class="sub" id="chatsub"></span></div>
+      <div class="pbody" id="chatbody"><div id="chat"></div></div>
+    </section>
+    <section class="panel" id="docwrap" aria-label="Design docs and ADRs">
+      <div class="ph-bar">Design docs &amp; ADRs<span class="sp"></span><span class="sub" id="docsub"></span></div>
+      <div class="tabs" id="doctabs" role="tablist"></div>
+      <div class="pbody" id="docs"></div>
+      <div class="veil" id="docveil" style="display:none"></div>
+    </section>
+    <section class="panel" id="codewrap" aria-label="Code">
+      <div class="ph-bar">Code<span class="sp"></span><span class="sub" id="codesub"></span></div>
+      <div class="tabs" id="codetabs" role="tablist"></div>
+      <div class="pbody" id="code"></div>
+      <div class="cfoot"><div class="meter" id="meter"></div><span class="tests" id="tests"></span></div>
+      <div class="veil" id="codeveil" style="display:none"><div><b>The red-team agent can't see this panel.</b>It gets the docs only, so the docs have to stand on their own.</div></div>
+    </section>
+  </main>
+  <div class="nav">
+    <button id="prev" aria-label="Previous step">← Prev</button>
+    <span class="cnt" id="cnt"></span>
+    <button id="next" class="primary" aria-label="Next step">Next →</button>
+    <span class="hint">keys: ← → · Home · End</span>
+  </div>
+</div>
+<script>
+const CODE = {
+ "spike_b.py": "from dataclasses import replace\nfrom graph import Graph\n\n\ndef fuse_conv_relu(g):\n    out, absorbed = [], {}\n    for n in g.nodes.values():\n        us = g.users(n.name)\n        if n.name in absorbed:\n            continue\n        if n.op == \"conv\" and len(us) == 1 and us[0].op == \"relu\":\n            absorbed[us[0].name] = n.name\n            n = replace(n, attrs={**n.attrs, \"fused\": [\"relu\"]})\n        out.append(replace(n, inputs=[absorbed.get(i, i) for i in n.inputs]))\n    return Graph(out, g.outputs)\n",
+ "fuse_v5.py": "import copy  #@cost\nfrom cost import traffic\n\n\ndef _apply(g, name, relu):\n    g.nodes[name].attrs[\"fused\"] = [\"relu\"]\n    for u in g.users(relu.name):\n        u.inputs = [name if i == relu.name else i for i in u.inputs]\n    g.outputs = [name if o == relu.name else o for o in g.outputs]\n    del g.nodes[relu.name]\n\n\ndef fuse_conv_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        users = g.users(name)\n        if len(users) == 1 and users[0].op == \"relu\":\n            before = cost(g)\n            snap = copy.deepcopy(g.nodes)  #@cost\n            _apply(g, name, users[0])\n            if cost(g) >= before:\n                g.nodes = snap  #@cost\n",
+ "fuse_b4.py": "import copy  #@cost\nfrom cost import traffic\n\n\ndef _chain(g, name, *ops):\n    \"\"\"conv -> ops[0] -> ops[1] ..., each with a single consumer.\"\"\"\n    chain, cur = [], name\n    for op in ops:\n        users = g.users(cur)\n        if len(users) != 1 or users[0].op != op:\n            return None\n        chain.append(users[0])\n        cur = users[0].name\n    return chain\n\n\ndef _apply(g, name, chain, extra=()):\n    tail = chain[-1]\n    g.nodes[name].attrs[\"fused\"] = [n.op for n in chain]\n    g.nodes[name].inputs += list(extra)\n    for u in g.users(tail.name):\n        u.inputs = [name if i == tail.name else i for i in u.inputs]\n    g.outputs = [name if o == tail.name else o for o in g.outputs]\n    for n in chain:\n        del g.nodes[n.name]\n\n\ndef _snapshot(g, name, chain):  #@cost\n    touched = {name} | {n.name for n in chain}  #@cost\n    touched |= {u.name for n in chain for u in g.users(n.name)}  #@cost\n    saved = {k: copy.deepcopy(g.nodes[k]) for k in touched}  #@cost\n    return saved, list(g.outputs), set(g.nodes)  #@cost\n\n\ndef _restore(g, snap):  #@cost\n    saved, outputs, names = snap  #@cost\n    for k in set(g.nodes) - names:  #@cost\n        del g.nodes[k]  #@cost\n    g.nodes.update(saved)  # TODO: restored nodes land at the end, order?  #@cost\n    g.outputs = outputs  #@cost\n\n\ndef _try(g, name, chain, cost, extra=()):\n    before = cost(g)\n    snap = _snapshot(g, name, chain)  #@cost\n    _apply(g, name, chain, extra)\n    if cost(g) >= before:\n        _restore(g, snap)  #@cost\n\n\ndef fuse_conv_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        chain = _chain(g, name, \"relu\")\n        if chain:\n            _try(g, name, chain, cost)\n\n\ndef fuse_conv_add_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        chain = _chain(g, name, \"add\", \"relu\")\n        if chain:\n            skip = [i for i in chain[0].inputs if i != name]\n            _try(g, name, chain, cost, skip)\n",
+ "test_v5.py": "from graph import Graph, Node\nfrom fuse import fuse_conv_relu\n\n\ndef tiny():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"c1\"], {\"bytes\": 64}),\n        Node(\"p\", \"pool\", [\"r1\"], {\"bytes\": 16}),\n    ], outputs=[\"p\"])\n\n\ndef test_conv_relu_is_fused():\n    g = tiny()\n    fuse_conv_relu(g)\n    assert \"r1\" not in g.nodes\n    assert g.nodes[\"c1\"].attrs[\"fused\"] == [\"relu\"]\n    assert g.nodes[\"p\"].inputs == [\"c1\"]\n\n\ndef test_unprofitable_fusion_is_rolled_back():\n    g = tiny()\n    fuse_conv_relu(g, cost=lambda g: -len(g.nodes))  # pretend fusing hurts\n    assert \"r1\" in g.nodes\n    assert \"fused\" not in g.nodes[\"c1\"].attrs\n",
+ "spike_a.py": "def fuse_conv_relu(g):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        users = g.users(name)\n        if len(users) == 1 and users[0].op == \"relu\":\n            relu = users[0]\n            g.nodes[name].attrs[\"fused\"] = [\"relu\"]\n            for u in g.users(relu.name):\n                u.inputs = [name if i == relu.name else i for i in u.inputs]\n            del g.nodes[relu.name]\n",
+ "test_v6.py": "from graph import Graph, Node\nfrom fuse import fuse_conv_relu, fuse_conv_add_relu\n\n\ndef tiny():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"c1\"], {\"bytes\": 64}),\n        Node(\"p\", \"pool\", [\"r1\"], {\"bytes\": 16}),\n    ], outputs=[\"p\"])\n\n\ndef residual():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"s\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"a1\", \"add\", [\"c1\", \"s\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"a1\"], {\"bytes\": 64}),\n    ], outputs=[\"r1\"])\n\n\ndef test_conv_relu_is_fused():\n    g = tiny()\n    fuse_conv_relu(g)\n    assert \"r1\" not in g.nodes\n    assert g.nodes[\"c1\"].attrs[\"fused\"] == [\"relu\"]\n    assert g.nodes[\"p\"].inputs == [\"c1\"]\n\n\ndef test_unprofitable_fusion_is_rolled_back():\n    g = tiny()\n    fuse_conv_relu(g, cost=lambda g: -len(g.nodes))  # pretend fusing hurts\n    assert \"r1\" in g.nodes\n    assert \"fused\" not in g.nodes[\"c1\"].attrs\n\n\ndef test_conv_add_relu_is_fused():\n    g = residual()\n    fuse_conv_add_relu(g)\n    assert g.nodes[\"c1\"].attrs[\"fused\"] == [\"add\", \"relu\"]\n    assert g.nodes[\"c1\"].inputs == [\"x\", \"s\"]\n    assert g.outputs == [\"c1\"]\n",
+ "fuse_v11.py": "from dataclasses import replace\nfrom cost import traffic\nfrom graph import Graph\n\n\ndef _chain(g, name, *ops):\n    \"\"\"conv -> ops[0] -> ops[1] ..., each with a single consumer.\"\"\"\n    chain, cur = [], name\n    for op in ops:\n        users = g.users(cur)\n        if len(users) != 1 or users[0].op != op:\n            return None\n        chain.append(users[0])\n        cur = users[0].name\n    return chain\n\n\ndef _apply(g, name, chain, extra=()):\n    tail, dead = chain[-1].name, {n.name for n in chain}\n    nodes = []\n    for n in g.nodes.values():\n        if n.name in dead:\n            continue\n        if n.name == name:\n            n = replace(n, inputs=n.inputs + list(extra),\n                        attrs={**n.attrs, \"fused\": [c.op for c in chain]})\n        nodes.append(replace(n, inputs=[name if i == tail else i for i in n.inputs]))\n    return Graph(nodes, [name if o == tail else o for o in g.outputs])\n\n\ndef _try(g, name, chain, cost, extra=()):\n    new = _apply(g, name, chain, extra)\n    return new if cost(new) < cost(g) else g\n\n\ndef fuse_conv_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        chain = _chain(g, name, \"relu\")\n        if chain:\n            g = _try(g, name, chain, cost)\n    return g\n\n\ndef fuse_conv_add_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        chain = _chain(g, name, \"add\", \"relu\")\n        if chain:\n            skip = [i for i in chain[0].inputs if i != name]\n            g = _try(g, name, chain, cost, skip)\n    return g\n",
+ "test_v11.py": "from graph import Graph, Node\nfrom fuse import fuse_conv_relu, fuse_conv_add_relu\n\n\ndef tiny():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"c1\"], {\"bytes\": 64}),\n        Node(\"p\", \"pool\", [\"r1\"], {\"bytes\": 16}),\n    ], outputs=[\"p\"])\n\n\ndef residual():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"s\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"a1\", \"add\", [\"c1\", \"s\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"a1\"], {\"bytes\": 64}),\n    ], outputs=[\"r1\"])\n\n\ndef test_conv_relu_is_fused():\n    out = fuse_conv_relu(tiny())\n    assert \"r1\" not in out.nodes\n    assert out.nodes[\"c1\"].attrs[\"fused\"] == [\"relu\"]\n    assert out.nodes[\"p\"].inputs == [\"c1\"]\n\n\ndef test_unprofitable_fusion_is_rejected():\n    g = tiny()\n    out = fuse_conv_relu(g, cost=lambda g: -len(g.nodes))  # pretend fusing hurts\n    assert out is g\n\n\ndef test_conv_add_relu_is_fused():\n    out = fuse_conv_add_relu(residual())\n    assert out.nodes[\"c1\"].attrs[\"fused\"] == [\"add\", \"relu\"]\n    assert out.nodes[\"c1\"].inputs == [\"x\", \"s\"]\n    assert out.outputs == [\"c1\"]\n\n\ndef test_input_graph_is_never_mutated():\n    g = tiny()\n    g.outputs = [\"r1\"]  # the relu is the graph output\n    out = fuse_conv_relu(g)\n    assert g.outputs == [\"r1\"] and \"r1\" in g.nodes\n    assert out.outputs == [\"c1\"]\n",
+ "test_v7.py": "from graph import Graph, Node\nfrom fuse import fuse_conv_relu, fuse_conv_add_relu\n\n\ndef tiny():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"c1\"], {\"bytes\": 64}),\n        Node(\"p\", \"pool\", [\"r1\"], {\"bytes\": 16}),\n    ], outputs=[\"p\"])\n\n\ndef residual():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"s\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"a1\", \"add\", [\"c1\", \"s\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"a1\"], {\"bytes\": 64}),\n    ], outputs=[\"r1\"])\n\n\ndef test_conv_relu_is_fused():\n    g = tiny()\n    fuse_conv_relu(g)\n    assert \"r1\" not in g.nodes\n    assert g.nodes[\"c1\"].attrs[\"fused\"] == [\"relu\"]\n    assert g.nodes[\"p\"].inputs == [\"c1\"]\n\n\ndef test_unprofitable_fusion_is_rolled_back():\n    g = tiny()\n    fuse_conv_relu(g, cost=lambda g: -len(g.nodes))  # pretend fusing hurts\n    assert \"r1\" in g.nodes\n    assert \"fused\" not in g.nodes[\"c1\"].attrs\n\n\ndef test_conv_add_relu_is_fused():\n    g = residual()\n    fuse_conv_add_relu(g)\n    assert g.nodes[\"c1\"].attrs[\"fused\"] == [\"add\", \"relu\"]\n    assert g.nodes[\"c1\"].inputs == [\"x\", \"s\"]\n    assert g.outputs == [\"c1\"]\n\n\ndef test_rejected_fusion_keeps_graph_outputs():\n    g = tiny()\n    g.outputs = [\"r1\"]  # the relu is the graph output\n    fuse_conv_relu(g, cost=lambda g: -len(g.nodes))\n    assert g.outputs == [\"r1\"]\n",
+ "graph.py": "from dataclasses import dataclass, field\n\n\n@dataclass\nclass Node:\n    name: str\n    op: str\n    inputs: list\n    attrs: dict = field(default_factory=dict)\n\n\nclass Graph:\n    def __init__(self, nodes, outputs):\n        self.nodes = {n.name: n for n in nodes}\n        self.outputs = list(outputs)\n\n    def users(self, name):\n        return [n for n in self.nodes.values() if name in n.inputs]\n",
+ "fuse_v4.py": "def fuse_conv_relu(g):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        users = g.users(name)\n        if len(users) == 1 and users[0].op == \"relu\":\n            relu = users[0]\n            g.nodes[name].attrs[\"fused\"] = [\"relu\"]\n            for u in g.users(relu.name):\n                u.inputs = [name if i == relu.name else i for i in u.inputs]\n            g.outputs = [name if o == relu.name else o for o in g.outputs]\n            del g.nodes[relu.name]\n",
+ "test_v8.py": "import pytest  #@cost\nfrom graph import Graph, Node\nfrom fuse import fuse_conv_relu, fuse_conv_add_relu\n\n\ndef tiny():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"c1\"], {\"bytes\": 64}),\n        Node(\"p\", \"pool\", [\"r1\"], {\"bytes\": 16}),\n    ], outputs=[\"p\"])\n\n\ndef residual():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"s\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"a1\", \"add\", [\"c1\", \"s\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"a1\"], {\"bytes\": 64}),\n    ], outputs=[\"r1\"])\n\n\ndef test_conv_relu_is_fused():\n    g = tiny()\n    fuse_conv_relu(g)\n    assert \"r1\" not in g.nodes\n    assert g.nodes[\"c1\"].attrs[\"fused\"] == [\"relu\"]\n    assert g.nodes[\"p\"].inputs == [\"c1\"]\n\n\ndef test_unprofitable_fusion_is_rolled_back():\n    g = tiny()\n    fuse_conv_relu(g, cost=lambda g: -len(g.nodes))  # pretend fusing hurts\n    assert \"r1\" in g.nodes\n    assert \"fused\" not in g.nodes[\"c1\"].attrs\n\n\ndef test_conv_add_relu_is_fused():\n    g = residual()\n    fuse_conv_add_relu(g)\n    assert g.nodes[\"c1\"].attrs[\"fused\"] == [\"add\", \"relu\"]\n    assert g.nodes[\"c1\"].inputs == [\"x\", \"s\"]\n    assert g.outputs == [\"c1\"]\n\n\n@pytest.mark.xfail(reason=\"ADR-001: rollback leaves g.outputs mutated\")  #@cost\ndef test_rejected_fusion_keeps_graph_outputs():\n    g = tiny()\n    g.outputs = [\"r1\"]  # the relu is the graph output\n    fuse_conv_relu(g, cost=lambda g: -len(g.nodes))\n    assert g.outputs == [\"r1\"]\n",
+ "fuse_b3.py": "import copy  #@cost\nfrom cost import traffic\n\n\ndef _chain(g, name, *ops):\n    \"\"\"conv -> ops[0] -> ops[1] ..., each with a single consumer.\"\"\"\n    chain, cur = [], name\n    for op in ops:\n        users = g.users(cur)\n        if len(users) != 1 or users[0].op != op:\n            return None\n        chain.append(users[0])\n        cur = users[0].name\n    return chain\n\n\ndef _apply(g, name, chain, extra=()):\n    tail = chain[-1]\n    g.nodes[name].attrs[\"fused\"] = [n.op for n in chain]\n    g.nodes[name].inputs += list(extra)\n    for u in g.users(tail.name):\n        u.inputs = [name if i == tail.name else i for i in u.inputs]\n    g.outputs = [name if o == tail.name else o for o in g.outputs]\n    for n in chain:\n        del g.nodes[n.name]\n\n\ndef _snapshot(g):  #@cost\n    return copy.deepcopy((g.nodes, g.outputs))  #@cost\n\n\ndef _restore(g, snap):  #@cost\n    g.nodes, g.outputs = snap  #@cost\n\n\ndef _try(g, name, chain, cost, extra=()):\n    before = cost(g)\n    snap = _snapshot(g)  #@cost\n    _apply(g, name, chain, extra)\n    if cost(g) >= before:\n        _restore(g, snap)  #@cost\n\n\ndef fuse_conv_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        chain = _chain(g, name, \"relu\")\n        if chain:\n            _try(g, name, chain, cost)\n\n\ndef fuse_conv_add_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        chain = _chain(g, name, \"add\", \"relu\")\n        if chain:\n            skip = [i for i in chain[0].inputs if i != name]\n            _try(g, name, chain, cost, skip)\n",
+ "fuse_v6.py": "import copy  #@cost\nfrom cost import traffic\n\n\ndef _chain(g, name, *ops):\n    \"\"\"conv -> ops[0] -> ops[1] ..., each with a single consumer.\"\"\"\n    chain, cur = [], name\n    for op in ops:\n        users = g.users(cur)\n        if len(users) != 1 or users[0].op != op:\n            return None\n        chain.append(users[0])\n        cur = users[0].name\n    return chain\n\n\ndef _apply(g, name, chain, extra=()):\n    tail = chain[-1]\n    g.nodes[name].attrs[\"fused\"] = [n.op for n in chain]\n    g.nodes[name].inputs += list(extra)\n    for u in g.users(tail.name):\n        u.inputs = [name if i == tail.name else i for i in u.inputs]\n    g.outputs = [name if o == tail.name else o for o in g.outputs]\n    for n in chain:\n        del g.nodes[n.name]\n\n\ndef _try(g, name, chain, cost, extra=()):\n    before = cost(g)\n    snap = copy.deepcopy(g.nodes)  #@cost\n    _apply(g, name, chain, extra)\n    if cost(g) >= before:\n        g.nodes = snap  #@cost\n\n\ndef fuse_conv_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        chain = _chain(g, name, \"relu\")\n        if chain:\n            _try(g, name, chain, cost)\n\n\ndef fuse_conv_add_relu(g, cost=traffic):\n    for name in [n.name for n in g.nodes.values() if n.op == \"conv\"]:\n        chain = _chain(g, name, \"add\", \"relu\")\n        if chain:\n            skip = [i for i in chain[0].inputs if i != name]\n            _try(g, name, chain, cost, skip)\n",
+ "test_v4.py": "from graph import Graph, Node\nfrom fuse import fuse_conv_relu\n\n\ndef tiny():\n    return Graph([\n        Node(\"x\", \"input\", []),\n        Node(\"c1\", \"conv\", [\"x\"], {\"bytes\": 64}),\n        Node(\"r1\", \"relu\", [\"c1\"], {\"bytes\": 64}),\n        Node(\"p\", \"pool\", [\"r1\"], {\"bytes\": 16}),\n    ], outputs=[\"p\"])\n\n\ndef test_conv_relu_is_fused():\n    g = tiny()\n    fuse_conv_relu(g)\n    assert \"r1\" not in g.nodes\n    assert g.nodes[\"c1\"].attrs[\"fused\"] == [\"relu\"]\n    assert g.nodes[\"p\"].inputs == [\"c1\"]\n",
+ "cost.py": "def traffic(g):\n    \"\"\"Estimated bytes moved: every node writes its output once.\"\"\"\n    return sum(n.attrs.get(\"bytes\", 0) for n in g.nodes.values())\n"
+};
+</script>
+<script>
+const C = CODE;
+const PROMPT = "POC: add a fusion pass to our toy graph IR. Fuse conv+relu, but keep a fusion only if it cuts estimated memory traffic. The lowering stage will consume the result next sprint.";
+
+/* ---------- text docs ---------- */
+const RULE_WATCH = `---
+description: Keep ADRs honest while coding
+alwaysApply: true
+---
+Before coding, read docs/adr/*.md.
+For every ADR that is Proposed, or Accepted with a
+"Revisit if" line:
+- Say which option this change assumes.
+- Learned something that supports or contradicts an
+  option? Append it to that ADR's Evidence log
+  (date, one line, which option it favors).
+- About to add code that exists ONLY because of the
+  current option (workaround, adapter, snapshot)?
+  Log it as "cost of A #n". If n >= 2: STOP and ask me.
+- Hit a new choice that is hard to reverse, or that
+  other teams will build on? Don't pick silently:
+  open a new Proposed ADR and ask me.
+Not worth an ADR: anything undoable in an afternoon.`;
+
+const D1 = `# Fusion POC: design
+
+Goal       Show conv+relu fusion cuts estimated
+           memory traffic.
+Non-goals  kernels, scheduling, dynamic shapes
+Consumer   lowering stage, sprint +1 (so contracts
+           matter)
+
+## Decisions
+ADR-001  Pass mutation model        Proposed
+`;
+const D3 = D1.replace("Proposed\n","Accepted\n");
+const D6 = D3.replace("Show conv+relu fusion cuts estimated\n           memory traffic.","Show conv+relu and conv+add+relu fusion\n           cut estimated memory traffic.")
+  + "ADR-002  Fused-op representation    Proposed\n";
+const D10 = D6.replace("ADR-001  Pass mutation model        Accepted","ADR-001  Pass mutation model        Superseded by 003")
+  .replace("ADR-002  Fused-op representation    Proposed","ADR-002  Fused-op representation    Accepted")
+  + "ADR-003  Passes return a new Graph  Accepted\n";
+
+const RULE_LOCK = `---
+description: Accepted design decisions, fusion package
+globs: src/**/*.py
+---
+Accepted ADRs in docs/adr/ are constraints, not hints.
+- ADR-003: every pass is fn(g: Graph) -> Graph.
+  Never mutate the input. Return the same object
+  if nothing changed. Use run_pass(), never call
+  a pass bare.
+- ADR-002: fused ops stay flat. attrs["fused"] lists
+  the absorbed ops; extra inputs are appended in
+  that order. Need a body/region? Open an ADR first.
+- ADR-001 is Superseded. Do not follow it.
+To change a decision: write a new ADR that
+"Supersedes" the old one. Never edit an Accepted ADR.`;
+
+/* ---------- ADR objects ---------- */
+const ADR1 = {
+  file:'docs/adr/001-pass-mutation-model.md', n:1, title:'Do passes mutate the graph, or return a new one?', status:'proposed',
+  context:'Every pass we write will copy this signature, and the lowering stage will call them. Changing it later touches every caller.',
+  options:[{k:'A',t:'**In place:** `fuse(g) -> None`. Cheapest to write, no copying.'},{k:'B',t:'**Functional:** `fuse(g) -> Graph`. The original graph stays valid.'}],
+  settle:['Do we ever need to **undo** a fusion (cost guard, backtracking)?','Does anything hold a reference to the graph across a pass?'],
+  evidence:[]
+};
+const ADR2 = {
+  file:'docs/adr/002-fused-op-representation.md', n:2, title:'How does a fused op look in the graph?', status:'proposed',
+  context:'conv+add+relu has a second input (the skip connection), so `attrs["fused"] = ["relu"]` is not enough. The lowering stage will parse whatever we pick.',
+  options:[{k:'A',t:'**Flat:** keep the conv node, `attrs["fused"] = ["add", "relu"]`, extra inputs appended to `inputs`.'},{k:'B',t:'**Region:** new `fused` op holding a `body` subgraph with explicit input mapping.'}],
+  settle:['What does lowering need to see: op + attrs, or a walkable body?','Will chains get longer than three ops?'],
+  evidence:[]
+};
+const ADR3 = {
+  file:'docs/adr/003-passes-return-new-graph.md', n:3, title:'Passes return a new Graph', status:'accepted', note:'supersedes ADR-001',
+  context:'ADR-001 evidence E3-E5: the cost guard needs undo, in-place undo means snapshot/restore of every Graph field, and the snapshot took 95% of the pass time.',
+  decision:'Option B. Every pass is `fn(g: Graph) -> Graph`. The input is never mutated; if nothing changes, return the same object.',
+  consequences:['Rejecting a fusion is `return g`. No snapshot or restore code exists.','The input graph stays valid, so before/after cost comparison is free.','Callers that ignore the return value will silently do nothing.'],
+  evidence:[]
+};
+
+/* ---------- GOOD PATH ---------- */
+const TOY = ['graph.py'];
+const GOOD = [
+{ phase:'Plan', title:'Ask before building', session:1,
+  notice:'The agent asks before it builds. Question 3 ("who consumes this?") is what turns a design choice into a contract.',
+  code:{'graph.py':C['graph.py']},
+  msgs:[
+    {r:'you',t:PROMPT},
+    {r:'agent',t:"Before I write anything, three questions. (Brainstorming mode: I keep my hands off the keyboard until we've covered them.)",
+      card:{type:'q',title:'1. What must this POC prove?',opts:['Fusion is correct','Fusion cuts estimated memory traffic','End-to-end speedup on hardware'],pick:1}},
+    {r:'agent',t:'',card:{type:'q',title:'2. Which patterns are in scope?',opts:['conv+relu only','Also conv+add+relu (residual)'],pick:0}},
+    {r:'agent',t:'',card:{type:'q',title:'3. Who consumes the output?',opts:['Lowering stage, next sprint','Nobody, throwaway'],pick:0}},
+    {r:'agent',t:"Question 3 matters most. If lowering builds on this, then **how passes are called** and **how fused ops look** become contracts. I'll watch for choices like that."}
+  ]},
+{ phase:'Plan', title:'Write the fork down first', session:1,
+  notice:'Only choices that are expensive to undo get an ADR, and each lists the evidence that would settle it. The rule file is what makes the agent keep it up to date.',
+  docs:{'design.md':D1,'adr-watch.mdc':RULE_WATCH}, adr:{1:ADR1},
+  msgs:[
+    {r:'agent',t:"I found one choice that is expensive to undo: should passes **mutate the graph in place or return a new one**? Every pass will copy that signature and lowering will call them.\n\nOpened ADR-001 as **Proposed**, with the evidence that would settle it. I did not open one for dataclass vs dict: we could undo that in an afternoon.",
+      chips:[['created','docs/design.md'],['created','docs/adr/001-pass-mutation-model.md'],['created','.cursor/rules/adr-watch.mdc']]},
+    {r:'agent',t:"I also added a project rule, so I keep the ADRs updated while I code instead of relying on memory."},
+    {r:'you',t:"Good. Spike both before we pick."}
+  ]},
+{ phase:'Spike', title:'Two spikes, not one POC', session:1,
+  notice:'A spike does not have to win. Here it only had to show which evidence matters (undo), and that went into the revisit trigger.',
+  code:{'spikes/a_inplace.py':C['spike_a.py'],'spikes/b_rewrite.py':C['spike_b.py']},
+  docs:{'design.md':D3},
+  adr:{1:{status:'accepted',note:'provisional',decision:'Option A, in place. Cheapest to try; the spikes could not separate A from B at this size.',
+    revisit:['A pass ever needs to **undo** a fusion.','Anything holds a reference to the graph across a pass.'],
+    evAdd:[{id:'E1',when:'Mon',favors:'—',text:'Spike A: 9 lines. Spike B: 11 lines. Both fuse the 3-node toy graph. Not separable at this size, and nothing needs undo yet.'}]}},
+  tests:['spikes: 2 ran on toy graph','ok'],
+  msgs:[
+    {r:'you',t:"Spike both. 15 minutes each, throwaway."},
+    {r:'agent',t:"Both pass on the 3-node toy graph. Honest result: **the spikes can't tell them apart.** What would decide it is *undo*, and nothing needs undo yet. So I wrote that down as the revisit trigger.",
+      chips:[['created','spikes/a_inplace.py (9 lines)'],['created','spikes/b_rewrite.py (11 lines)']]},
+    {r:'you',t:"Start with A, it's cheaper. Mark it Accepted, but keep the trigger."},
+    {r:'agent',t:"ADR-001 is **Accepted (provisional)** with two revisit triggers. Logged the spike result as E1.",chips:[['edited','docs/adr/001-…md','status, decision, revisit, E1']]}
+  ]},
+{ phase:'Code', title:'Code with the ADR open', session:1,
+  notice:'Every change starts by saying which option it assumes, and logs evidence even when the news is boring.',
+  code:{'fuse.py':C['fuse_v4.py'],'test_fuse.py':C['test_v4.py']}, drop:['spikes/a_inplace.py','spikes/b_rewrite.py'],
+  adr:{1:{evAdd:[{id:'E2',when:'Mon',favors:'A',text:'conv+relu fused in place: 10 lines plus one test. No undo needed so far, so the revisit trigger is not hit.'}]}},
+  tests:['pytest: 1 passed','ok'],
+  msgs:[
+    {r:'you',t:"Go: conv+relu pass."},
+    {r:'agent',t:"Read ADR-001. This change **assumes option A** (in place). The pass is 10 lines and one test. Neither revisit trigger is hit, so I logged E2 and moved on.",
+      chips:[['created','fuse.py'],['created','test_fuse.py'],['edited','ADR-001','E2']]}
+  ]},
+{ phase:'Code', title:'The first workaround', session:1,
+  notice:'First workaround: log it and keep going. The 3 amber lines exist only because we chose A, and now that cost is on the record.',
+  code:{'cost.py':C['cost.py'],'fuse.py':C['fuse_v5.py'],'test_fuse.py':C['test_v5.py']},
+  adr:{1:{evAdd:[{id:'E3',when:'Tue',favors:'B',tag:'cost of A #1',text:'The cost guard needs undo. Added a deepcopy snapshot plus rollback: 3 lines that exist only because passes mutate in place. Revisit trigger "undo" is now hit.'}]}},
+  tests:['pytest: 2 passed','ok'],
+  msgs:[
+    {r:'you',t:"Now the cost guard: keep a fusion only if traffic drops."},
+    {r:'agent',t:"The guard needs **undo**. That is revisit trigger #1 in ADR-001, and option A has no undo. I added a deepcopy snapshot with rollback: **3 lines that exist only because of A**.\n\nLogged as *cost of A #1*, tests green, continuing. One more A-only workaround and I'll stop and ask.",
+      chips:[['created','cost.py'],['edited','fuse.py','+3 A-only'],['edited','ADR-001','E3']]}
+  ]},
+{ phase:'Code', title:'A decision nobody planned', session:1,
+  notice:'An unforeseen hard-to-reverse choice shows up mid-dev. The agent opens ADR-002 instead of silently picking one.',
+  code:{'fuse.py':C['fuse_v6.py'],'test_fuse.py':C['test_v6.py']},
+  docs:{'design.md':D6},
+  adr:{2:Object.assign({},ADR2,{evAdd:[{id:'E1',when:'Tue',favors:'A',text:'Flat form handles conv+add+relu: the skip input is appended to `inputs` and `fused = ["add", "relu"]`. Input position is implied by order.'}]})},
+  tests:['pytest: 3 passed','ok'],
+  msgs:[
+    {r:'you',t:"Add the residual pattern too: conv + add + relu."},
+    {r:'agent',t:"Problem: the `add` has a **second input** (the skip connection) and `fused = [\"relu\"]` can't carry it.\n\nHow a fused op looks is a **new choice that lowering will parse**, so I'm not picking it silently. Opened **ADR-002 (Proposed)**: flat attrs vs a region body. Building flat as the cheap option for now.",
+      chips:[['created','ADR-002'],['edited','fuse.py','refactor + new pass'],['edited','test_fuse.py','+1 test']]},
+    {r:'you',t:"Go flat. I'll ask Dana what lowering needs."}
+  ]},
+{ phase:'Code', title:'STOP: workaround #2', session:1,
+  notice:'The rule turns workaround #2 into a stop sign. The agent has not touched the code. The human picks between patching, switching, and deferring.',
+  code:{'test_fuse.py':C['test_v7.py']},
+  adr:{1:{evAdd:[{id:'E4',when:'Tue',favors:'B',tag:'cost of A #2',text:'Edge-case test failed: a rejected fusion leaves `g.outputs` rewritten, because rollback only restored `nodes`. The real fix is "snapshot every Graph field, forever". Stopped and asked.'}]}},
+  tests:['pytest: 3 passed, 1 failed','bad'],
+  msgs:[
+    {r:'agent',t:"I ran an edge-case sweep and added a test: *the relu is the graph output, and the fusion gets rejected.* **It fails.** Rollback restored `nodes` but not `g.outputs`.",
+      chips:[['edited','test_fuse.py','+1 failing test'],['edited','ADR-001','E4']],
+      card:{type:'stop',title:'⛔ STOP · cost of A #2 (ADR-001)',
+        body:"The fix is a snapshot/restore pair that covers every field of `Graph`, now and for every field added later. That is the second thing that exists only because of option A. I haven't changed any code.",
+        opts:['**Patch and continue** (+4 lines of A-only code)','**Switch to B now** (about 25 lines changed, deletes the snapshot)','**Mark the test xfail, finish the POC, decide at the gate**'],pick:-1}},
+    {r:'agent',t:"My recommendation is the third. We'll get a real number out of the full POC."}
+  ]},
+{ phase:'Code', title:'Defer, with a cap', session:1,
+  notice:'Deferring is fine if it is explicit and capped. The wait paid off: measurement shows 95% of the pass time is the workaround.',
+  code:{'test_fuse.py':C['test_v8.py']},
+  adr:{1:{evAdd:[{id:'E5',when:'Wed',favors:'B',tag:'measured',text:'2,002-node synthetic chain: the pass takes 6.3 s, and 6.0 s of that is deepcopy (95%). Per-candidate snapshots make the pass O(n²).'}]},
+        2:{evAdd:[{id:'E2',when:'Wed',favors:'A',text:'Asked lowering (Dana): "We match on op + attrs this sprint. A region body would be nicer later."'},
+                  {id:'E3',when:'Wed',favors:'A',text:'Toy ResNet block (conv, relu, conv, add, relu): estimated traffic 320 → 128 units (−60%) with the flat form.'}]}},
+  tests:['pytest: 3 passed, 1 xfailed','warn'],
+  msgs:[
+    {r:'you',t:"Third option. xfail it and log it. No more A-only workarounds: we decide at the gate."},
+    {r:'agent',t:"Done. The test is marked xfail with the ADR in the reason. I finished the POC without adding any more A-only code.\n\nNumbers: toy ResNet block traffic **320 → 128 units (−60%)**. On a 2,002-node synthetic graph the pass takes **6.3 s, 6.0 s of it deepcopy.** Dana's answer on lowering is also logged.",
+      chips:[['edited','test_fuse.py','xfail'],['edited','ADR-001','E5'],['edited','ADR-002','E2, E3']]}
+  ]},
+{ phase:'Gate', title:'Summarize the evidence', session:1,
+  notice:'The gate is a summary of evidence, not a debate from memory. The agent also lists which code serves which option.',
+  msgs:[
+    {r:'you',t:"POC exit gate. For each ADR: summarize its Evidence log and recommend accept, supersede, or keep exploring."},
+    {r:'agent',t:'',card:{type:'table',head:['ADR','Evidence','Recommend'],rows:[
+      ['**001**','mutation model · *Accepted (provisional)*\n5 entries. Undo trigger hit. 2 costs of A. Snapshot = 95% of pass time (2k nodes).','**Supersede** with B (functional)'],
+      ['**002**','fused-op format · *Proposed*\n3 entries. Flat works, lowering is fine with it, traffic −60% on toy block.','**Accept** A (flat). Risk: input position is implied by order.']]}},
+    {r:'agent',t:"Code that exists only for the losing option (A): `import copy`, the snapshot line, the rollback line, `import pytest`, and the xfail marker. **5 lines.** Nothing is deleted yet."}
+  ]},
+{ phase:'Gate', title:'The human decides', session:1,
+  notice:'ADR-001 is not edited, it is superseded, so the history stays readable. Nothing is deleted until the human sees the list.',
+  docs:{'design.md':D10},
+  adr:{1:{status:'superseded',note:'by ADR-003'},
+       2:{status:'accepted',decision:'Option A, flat. `attrs["fused"]` lists the absorbed ops and extra inputs are appended in that order.',consAdd:['Input position is implied by order in `fused`.']},
+       3:ADR3},
+  msgs:[
+    {r:'you',t:"Agreed on both. Supersede 001 with the functional one, accept 002 as flat. Write ADR-003, and show me what you'd delete before you delete it."},
+    {r:'agent',t:"Done. ADR-001 is **Superseded by ADR-003** and kept in the repo with its evidence. ADR-002 is **Accepted**. ADR-003 is new.",
+      chips:[['created','ADR-003'],['edited','ADR-001','status'],['edited','ADR-002','status, decision'],['edited','design.md']]},
+    {r:'agent',t:"",card:{type:'list',title:'Delete list (not applied yet)',items:['`fuse.py`: remove `import copy`, snapshot line, rollback line (3)','`test_fuse.py`: remove `import pytest` and the xfail marker (2)','`_apply` builds a new Graph; every pass returns it (rewrite, not deletion)']}}
+  ]},
+{ phase:'Gate', title:'Delete the losing option', session:1,
+  notice:'Switching needed no clever code: rejecting a fusion is just `return g`. The 5 amber lines are gone, and the old xfail test passes without any fix.',
+  code:{'fuse.py':C['fuse_v11.py'],'test_fuse.py':C['test_v11.py']},
+  adr:{3:{evAdd:[{id:'E1',when:'Thu',favors:'B',text:'Same 2,002-node graph with the functional pass: 1.3 s (was 6.3 s). Still O(n) per applied fusion: rebuild plus `users()` scan.'}]}},
+  tests:['pytest: 4 passed','ok'],
+  msgs:[
+    {r:'you',t:"Do it."},
+    {r:'agent',t:"Done. Passes are now `fn(g) -> Graph`. The snapshot and rollback are gone, and the xfail test **passes without any fix**: it was only ever failing because of option A.\n\nSame 2,002-node graph: **6.3 s → 1.3 s**. Logged in ADR-003.",
+      chips:[['edited','fuse.py','A-only lines 5 → 0'],['edited','test_fuse.py'],['edited','ADR-003','E1']]}
+  ]},
+{ phase:'Red-team', title:'A fresh agent attacks the docs', session:2, veilCode:true,
+  notice:'The red-team agent sees only docs/. If the ADRs cannot stand alone without the chat, it will tell you.',
+  msgs:[
+    {r:'sys',t:'NEW SESSION · fresh context · reads docs/design.md + docs/adr/*.md only'},
+    {r:'you',t:"Review these docs as a skeptical staff engineer. Find decisions with weak evidence, missing consequences, and claims the evidence does not support. You have not seen any code or chat."},
+    {r:'agent',who:'Red-team agent',t:"Read 4 files. Three findings, by severity:",
+      card:{type:'find',items:[
+        ['hi',"**ADR-003, breaking change with no migration.** A caller that still writes `fuse_conv_relu(g)` and ignores the return value now silently does nothing. The ADR never says how callers find out."],
+        ['md',"**ADR-002, accepted with no \"Revisit if\".** Extra-input position is implied by order in `fused`. With two extra inputs that is ambiguous, and lowering will have parsed it by then."],
+        ['md',"**ADR-003, thin evidence.** One measurement at 2k nodes, and the ADR itself says rebuild is still O(n) per fusion. No number at a realistic size."],
+        ['ok',"**What holds up:** ADR-001's evidence log. Each claim ties to a measurement or a failing test."]]}}
+  ]},
+{ phase:'Red-team', title:'Triage the findings', session:1,
+  notice:'Red-team output is input to a human. Fix now, ticket, or ignore. The docs changed; the code did not.',
+  adr:{2:{revAdd:['A pattern needs **more than one extra input**, or lowering needs the body. Input order is currently implied by `fused`.']},
+       3:{consAdd:['**Migration:** `run_pass()` raises if a pass returns `None`, so ignored return values fail loudly.'],revAdd:['Rebuild cost at 50k nodes is too high. **PERF-212** benchmarks it.']}},
+  msgs:[
+    {r:'you',t:"Thanks. #1 and #2 now. #3 goes to a ticket (PERF-212) and shouldn't block the merge."},
+    {r:'agent',t:"Done, docs only:\n- ADR-003: migration line (`run_pass()` raises on `None`; the code lands in PR 4) and a revisit trigger that points at PERF-212.\n- ADR-002: a \"Revisit if\" line for 2+ extra inputs.",
+      chips:[['edited','ADR-002','Revisit if'],['edited','ADR-003','consequence, revisit']]}
+  ]},
+{ phase:'Lock-in', title:'Decisions become rules', session:1,
+  notice:'Accepted ADRs become constraints that every future session loads automatically. The superseded one is labeled so nobody follows it.',
+  docs:{'decisions.mdc':RULE_LOCK},
+  msgs:[
+    {r:'you',t:"Lock it in. Turn the accepted ADRs into a rule and plan the PRs."},
+    {r:'agent',t:"Created a Cursor rule from the accepted ADRs and added the same text under `## Design decisions` in `CLAUDE.md`, so Claude Code follows it too. ADR-001 stays in the repo as a labeled gravestone: *we tried this*.",
+      chips:[['created','.cursor/rules/decisions.mdc'],['edited','CLAUDE.md','## Design decisions']]},
+    {r:'agent',t:'',card:{type:'prs',title:'Production PRs, each small enough to review',items:[
+      ['PR 1','`Graph` + the pass contract (ADR-003)'],['PR 2','conv+relu and the cost guard'],['PR 3','residual pattern (ADR-002)'],['PR 4','`run_pass()` and the None check']]}},
+    {r:'agent',t:"The next POC starts with these as constraints, not as stories someone has to remember."}
+  ]}
+];
+
+/* ---------- BAD PATH ---------- */
+const BAD = [
+{ phase:'Prompt', title:'Same prompt, no questions', session:1,
+  notice:'It looks identical to the good path, until you notice what is missing: no questions, no fork noticed, no doc.',
+  code:{'graph.py':C['graph.py'],'fuse.py':C['fuse_v4.py'],'test_fuse.py':C['test_v4.py']},
+  tests:['pytest: 1 passed','ok'],
+  msgs:[
+    {r:'you',t:PROMPT},
+    {r:'agent',t:"On it! 🚀 Done: a 10-line in-place pass with a test. All green ✅",chips:[['created','fuse.py'],['created','test_fuse.py']]}
+  ]},
+{ phase:'Code', title:'The first workaround, unseen', session:1,
+  notice:'Workaround #1: 3 lines, perfectly reasonable, and invisible. Nobody knows it exists because of a choice.',
+  code:{'cost.py':C['cost.py'],'fuse.py':C['fuse_v5.py'],'test_fuse.py':C['test_v5.py']},
+  tests:['pytest: 2 passed','ok'],
+  msgs:[
+    {r:'you',t:"Now the cost guard: keep a fusion only if traffic drops."},
+    {r:'agent',t:"Done ✅ I added a deepcopy snapshot so a rejected fusion can be rolled back.",chips:[['created','cost.py'],['edited','fuse.py']]}
+  ]},
+{ phase:'Code', title:'Two silent decisions', session:1,
+  notice:'The fused-op format (lowering will parse it) and workaround #2 are both decided, and neither is written down anywhere.',
+  code:{'fuse.py':C['fuse_b3.py'],'test_fuse.py':C['test_v7.py']},
+  tests:['pytest: 4 passed','ok'],
+  msgs:[
+    {r:'you',t:"Add the residual pattern too: conv + add + relu."},
+    {r:'agent',t:"Done ✅ The skip input is appended to the conv's inputs and `fused = [\"add\", \"relu\"]`. A new test showed rollback left `g.outputs` broken, so the snapshot now covers outputs too.",chips:[['edited','fuse.py'],['edited','test_fuse.py']]}
+  ]},
+{ phase:'Week 2', title:'The workaround gets a workaround', session:1,
+  notice:'A performance fix for a problem that exists only because of in-place mutation. The 14 amber lines are now load-bearing.',
+  code:{'fuse.py':C['fuse_b4.py']},
+  tests:['pytest: 4 passed','ok'],
+  msgs:[
+    {r:'you',t:"Profiling says the pass is slow on big graphs."},
+    {r:'agent',t:"deepcopy was 95% of the time. I now snapshot only the touched nodes ✅ Side effect: restored nodes land at the end of the dict. Left a TODO.",chips:[['edited','fuse.py','snapshot is now local']]}
+  ]},
+{ phase:'Week 4', title:'The POC is load-bearing', session:1,
+  notice:'No evidence, no decision record, no one to ask. The workaround is now production code. Same model, same prompts: the difference is a docs/adr folder.',
+  msgs:[
+    {r:'sys',t:'WEEK 4 · NEW SESSION · lowering already calls these passes'},
+    {r:'you',t:"Reviewer: why does a fusion pass have a snapshot/restore subsystem? Can we delete it?"},
+    {r:'agent',t:"I can't find a record of why. It looks like undo support for the cost guard. Removing it changes every pass's signature, and lowering already depends on them. Safer to leave it. 🤷"},
+    {r:'you',t:"So the POC is production now."}
+  ]}
+];
+
+</script>
+<script>
+/* ---------- helpers ---------- */
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmt = s => esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\*([^*]+)\*/g,'<i>$1</i>').replace(/\n/g,'<br>');
+const KW = new Set('def return if else elif for in import from not and or is None True False continue lambda assert class del with as raise try except pass'.split(' '));
+function hlPy(line){
+  const re=/("""[\s\S]*?"""|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(#.*)|(\b\d+\b)|([A-Za-z_]\w*)|([\s\S])/g;
+  let out='', m, prev='';
+  while((m=re.exec(line))){
+    if(m[1]) out+='<span class="tk-s">'+esc(m[1])+'</span>';
+    else if(m[2]) out+='<span class="tk-c">'+esc(m[2])+'</span>';
+    else if(m[3]) out+='<span class="tk-n">'+esc(m[3])+'</span>';
+    else if(m[4]){
+      if(KW.has(m[4])) out+='<span class="tk-k">'+m[4]+'</span>';
+      else if(prev==='def') out+='<span class="tk-f">'+m[4]+'</span>';
+      else out+=m[4];
+      prev=m[4];
+    } else { out+=esc(m[5]); if(m[5].trim()) prev=''; }
+  }
+  return out;
+}
+function hlMd(line){
+  if(/^(#|---)/.test(line)) return '<span class="tk-h">'+esc(line)+'</span>';
+  if(/^(description|alwaysApply|globs):/.test(line)) return '<span class="tk-k">'+esc(line)+'</span>';
+  return esc(line);
+}
+function lcsDiff(a,b){
+  const n=a.length,m=b.length, L=Array.from({length:n+1},()=>new Array(m+1).fill(0));
+  for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)L[i][j]=a[i]===b[j]?L[i+1][j+1]+1:Math.max(L[i+1][j],L[i][j+1]);
+  const out=[];let i=0,j=0;
+  while(i<n&&j<m){ if(a[i]===b[j]){out.push({t:'same',s:b[j]});i++;j++} else if(L[i+1][j]>=L[i][j+1]){out.push({t:'del',s:a[i]});i++} else {out.push({t:'add',s:b[j]});j++} }
+  while(i<n)out.push({t:'del',s:a[i++]}); while(j<m)out.push({t:'add',s:b[j++]});
+  return out;
+}
+const COST=/\s*#@cost\s*$/;
+const splitLines = t => t.replace(/\n$/,'').split('\n');
+function countCost(files){ let c=0; for(const k in files) for(const l of splitLines(files[k])) if(COST.test(l)) c++; return c; }
+
+/* ---------- state building ---------- */
+function applyPatch(a,p){
+  const o=Object.assign({},a);
+  for(const k in p){
+    if(k==='evAdd') o.evidence=(o.evidence||[]).concat(p[k]);
+    else if(k==='consAdd') o.consequences=(o.consequences||[]).concat(p[k]);
+    else if(k==='revAdd') o.revisit=(o.revisit||[]).concat(p[k]);
+    else o[k]=p[k];
+  }
+  return o;
+}
+function buildStates(steps){
+  const states=[]; let files={}, docs={}, adrs={};
+  steps.forEach((s,i)=>{
+    files=Object.assign({},files,s.code||{}); (s.drop||[]).forEach(k=>delete files[k]);
+    docs=Object.assign({},docs,s.docs||{});
+    const na={}; for(const k in adrs) na[k]=adrs[k];
+    for(const k in (s.adr||{})) na[k]=applyPatch(na[k]||{n:+k},s.adr[k]);
+    adrs=na;
+    states.push({files:Object.assign({},files),docs:Object.assign({},docs),adrs:Object.assign({},adrs)});
+  });
+  return states;
+}
+
+/* ---------- ADR rendering ---------- */
+const STAT={proposed:'Proposed',accepted:'Accepted',superseded:'Superseded'};
+function adrBlocks(a){
+  const B=[]; const pad=n=>String(n).padStart(3,'0');
+  const slug=(a.file||'');
+  B.push({key:'head',html:'<div class="adr-file">'+esc(slug)+'</div><div class="adr-title '+(a.status==='superseded'?'sup':'')+'">ADR-'+pad(a.n)+' · '+esc(a.title)+'</div>'
+    +'<span class="badge '+a.status+'">'+STAT[a.status]+'</span>'
+    +(a.note?'<span class="badge-note">'+esc(a.note)+'</span>':'')});
+  if(a.context) B.push({key:'ctx',html:'<h4>Context</h4>'+fmt(a.context)});
+  if(a.options) B.push({key:'opts',html:'<h4>Options</h4>'+a.options.map(o=>'<div class="optrow"><b>'+o.k+'</b><div>'+fmt(o.t)+'</div></div>').join('')});
+  if(a.settle) B.push({key:'settle',html:'<h4>Evidence that would settle it</h4><ul class="l">'+a.settle.map(x=>'<li>'+fmt(x)+'</li>').join('')+'</ul>'});
+  if(a.decision) B.push({key:'dec',html:'<h4>Decision</h4>'+fmt(a.decision)});
+  (a.consequences||[]).forEach((c,i)=>B.push({key:'cons:'+c,item:true,html:(i===0?'<h4>Consequences</h4>':'')+fmt(c)}));
+  (a.revisit||[]).forEach((c,i)=>B.push({key:'rev:'+c,item:true,html:(i===0?'<h4>Revisit if</h4>':'')+fmt(c)}));
+  if(a.evidence&&a.evidence.length){
+    B.push({key:'evh',html:'<h4>Evidence log</h4>'});
+    a.evidence.forEach(e=>B.push({key:'ev:'+e.id+e.text,item:true,html:'<div class="ev"><span class="id">'+e.id+'</span><div class="tx">'+fmt(e.text)
+      +'<div class="meta"><span>'+esc(e.when)+'</span>'+(e.tag?'<span class="pill cost">'+esc(e.tag)+'</span>':'')
+      +'<span class="pill '+(e.favors==='A'?'fa':e.favors==='B'?'fb':'fn')+'">'+(e.favors==='—'||!e.favors?'neutral':'favors '+e.favors)+'</span></div></div></div>'}));
+  }
+  return B;
+}
+
+function scrollToChange(body,sel,off){
+  let els=body.querySelectorAll(sel); if(!els.length){ body.scrollTop=0; return; }
+  const first=els[0], last=els[els.length-1];
+  const bottom=last.offsetTop+last.offsetHeight;
+  const desired=Math.max(first.offsetTop-off,0), need=Math.max(bottom-body.clientHeight+12,0);
+  body.scrollTop = need<=desired ? Math.round((need+desired)/2) : desired;
+}
+/* ---------- app ---------- */
+const MODES={good:{steps:GOOD,label:'A-only lines',hint:'lines that exist only because of option A'},bad:{steps:BAD,label:'workaround lines',hint:'highlighted for you; nobody flagged them'}};
+for(const m in MODES) MODES[m].states=buildStates(MODES[m].steps);
+let mode='good', idx=0;
+const $=id=>document.getElementById(id);
+let selCode=null, selDoc=null, lastKey='';
+
+function parseHash(){ const m=/^#(good|bad)\/(\d+)/.exec(location.hash); if(m&&MODES[m[1]]){mode=m[1]; idx=Math.min(Math.max(+m[2]-1,0),MODES[mode].steps.length-1);} }
+function go(n){ const N=MODES[mode].steps.length; idx=Math.min(Math.max(n,0),N-1); render(); }
+function setMode(m){ mode=m; idx=0; render(); }
+
+function render(){
+  const M=MODES[mode], steps=M.steps, st=M.states[idx], prev=M.states[Math.max(idx-1,0)], step=steps[idx];
+  const first=idx===0; const prevS=first?st:prev;
+  document.body.classList.toggle('bad',mode==='bad');
+  history.replaceState(null,'','#'+mode+'/'+(idx+1));
+  document.querySelectorAll('.seg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===mode));
+
+  /* timeline */
+  const groups=[]; steps.forEach((s,i)=>{ const g=groups[groups.length-1]; if(g&&g.name===s.phase) g.items.push(i); else groups.push({name:s.phase,items:[i]}); });
+  $('timeline').innerHTML=groups.map(g=>'<div class="phase '+(g.items.includes(idx)?'cur':'')+'" style="flex:'+g.items.length+' 1 0">'
+    +'<div class="pl">'+esc(g.name)+'</div><div class="bar">'+g.items.map(i=>'<button class="dot '+(i<idx?'past':i===idx?'cur':'')+'" data-i="'+i+'" aria-label="Step '+(i+1)+': '+esc(steps[i].title)+'"'+(i===idx?' aria-current="step"':'')+'>'+(i+1)+'</button>').join('')+'</div></div>').join('');
+  $('timeline').querySelectorAll('.dot').forEach(b=>b.onclick=()=>go(+b.dataset.i));
+
+  /* caption */
+  $('cap').innerHTML='<div class="t"><span class="ph">'+esc(step.phase)+'</span>'+esc(step.title)+'</div><div class="n">👀 <b>What to notice:</b> '+fmt(step.notice)+'</div>';
+  $('cnt').textContent=(idx+1)+' / '+steps.length;
+  $('prev').disabled=idx===0; $('next').disabled=idx===steps.length-1;
+
+  const chips=[]; 
+  /* chat */
+  renderChat(step,steps);
+  /* docs */
+  const dch=renderDocs(st,prevS,step,first,chips);
+  /* code */
+  renderCode(st,prevS,step,first,chips);
+  $('chips').innerHTML=chips.map(c=>'<span class="chip '+c[0]+'">'+esc(c[1])+'</span>').join('');
+  const key=mode+idx; if(key!==lastKey){ lastKey=key; }
+}
+
+function msgHtml(m,isNew,old){
+  if(m.r==='sys') return '<div class="sysmsg">'+esc(m.t)+'</div>';
+  let h='<div class="msg '+m.r+(old?' old':'')+(isNew?' new':'')+'"><div class="who">'+(m.r==='you'?'You':(m.who||'Agent'))+'</div>'+fmt(m.t||'');
+  if(m.chips) h+='<div class="chips2">'+m.chips.map(c=>'<span class="fchip"><b>'+esc(c[0])+'</b> '+esc(c[1])+(c[2]?' <i>'+esc(c[2])+'</i>':'')+'</span>').join('')+'</div>';
+  if(m.code) h+='<pre class="cb">'+esc(m.code)+'</pre>';
+  if(m.card){ const c=m.card;
+    if(c.type==='q'||c.type==='stop') h+='<div class="card '+(c.type==='stop'?'stop':'')+'"><div class="ct">'+fmt(c.title)+'</div>'+(c.body?'<div class="sm">'+fmt(c.body)+'</div>':'')+c.opts.map((o,i)=>'<div class="opt '+(c.pick===i?'pick':'')+'"><span class="rb"></span><span>'+fmt(o)+'</span></div>').join('')+'</div>';
+    if(c.type==='table') h+='<div class="card"><table class="t"><tr>'+c.head.map(x=>'<th>'+esc(x)+'</th>').join('')+'</tr>'+c.rows.map(r=>'<tr>'+r.map(x=>'<td>'+fmt(x)+'</td>').join('')+'</tr>').join('')+'</table></div>';
+    if(c.type==='list') h+='<div class="card"><div class="ct">'+fmt(c.title)+'</div><ul class="l" style="font-size:12.5px;color:#CBD0EE">'+c.items.map(x=>'<li>'+fmt(x)+'</li>').join('')+'</ul></div>';
+    if(c.type==='find') h+='<div class="card">'+c.items.map(f=>'<div class="find"><span class="sev '+f[0]+'">'+({hi:'HIGH',md:'MED',ok:'OK'})[f[0]]+'</span><div>'+fmt(f[1])+'</div></div>').join('')+'</div>';
+    if(c.type==='prs') h+='<div class="card"><div class="ct">'+fmt(c.title)+'</div><ul class="prs">'+c.items.map(f=>'<li><span>'+esc(f[0])+'</span><div>'+fmt(f[1])+'</div></li>').join('')+'</ul></div>';
+  }
+  return h+'</div>';
+}
+function renderChat(step,steps){
+  const sess=step.session||1; let html='', firstNew=-1, k=0;
+  steps.forEach((s,i)=>{ if(i>idx||(s.session||1)!==sess) return;
+    (s.msgs||[]).forEach(m=>{ const isNew=i===idx; if(isNew&&firstNew<0) firstNew=k; html+=msgHtml(m,isNew,!isNew&&m.r!=='sys'); k++; }); });
+  const c=$('chat'); c.innerHTML=html;
+  $('chatsub').textContent=sess===1?(MODES[mode]===MODES.bad?'no ADR rule loaded':'rule: adr-watch.mdc'):'session 2 · fresh context';
+  const body=$('chatbody'); const nodes=c.children;
+  requestAnimationFrame(()=>{ const t=nodes[firstNew]; body.scrollTop=t?Math.max(t.offsetTop-10,0):0; });
+}
+function docTabs(st){
+  const tabs=[]; if(st.docs['design.md']!==undefined) tabs.push({id:'design.md',label:'design.md',kind:'txt'});
+  Object.keys(st.adrs).sort().forEach(k=>tabs.push({id:'adr'+k,label:'ADR-'+String(k).padStart(3,'0'),kind:'adr',status:st.adrs[k].status}));
+  [['adr-watch.mdc','adr-watch','.cursor/rules/adr-watch.mdc'],['decisions.mdc','decisions','.cursor/rules/decisions.mdc']].forEach(f=>{ if(st.docs[f[0]]!==undefined) tabs.push({id:f[0],label:f[1],title:f[2],kind:'txt'}); });
+  return tabs;
+}
+function blocksOf(tab,st){ if(tab.kind==='adr') return adrBlocks(st.adrs[tab.id.slice(3)]); return null; }
+function tabChanged(tab,st,prevS,first){
+  if(first) return false;
+  if(tab.kind==='adr'){ const n=tab.id.slice(3); const a=prevS.adrs[n]; if(!a) return true; return JSON.stringify(a)!==JSON.stringify(st.adrs[n]); }
+  return prevS.docs[tab.id]!==st.docs[tab.id];
+}
+function renderDocs(st,prevS,step,first,chips){
+  const tabs=docTabs(st); const wrap=$('doctabs'), body=$('docs');
+  if(!tabs.length){ wrap.innerHTML=''; wrap.style.display='none'; body.innerHTML='<div class="empty"><b>docs/</b> does not exist.<br>No design doc, no ADRs, no rule file.<br><span class="mono">Decisions live in the chat history<br>and in nobody\'s head.</span></div>'; $('docsub').textContent='nothing here'; return; }
+  wrap.style.display='flex';
+  const changed=tabs.filter(t=>tabChanged(t,st,prevS,first)).map(t=>t.id);
+  if(!selDoc||!tabs.some(t=>t.id===selDoc)||lastKey!==mode+idx) { if(changed.length) selDoc=changed.find(x=>/^adr\d/.test(x))||changed[0]; else if(!tabs.some(t=>t.id===selDoc)) selDoc=tabs[0].id; }
+  wrap.innerHTML=tabs.map(t=>'<button class="tab" role="tab" title="'+esc(t.title||t.label)+'" data-id="'+t.id+'" aria-selected="'+(t.id===selDoc)+'">'+(t.kind==='adr'?'<span class="s '+t.status+'"></span>':'')+esc(t.label)+(changed.includes(t.id)?'<span class="u" title="changed in this step"></span>':'')+'</button>').join('');
+  wrap.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{selDoc=b.dataset.id; renderDocs(st,prevS,step,first,[]);});
+  $('docsub').textContent=changed.length?changed.length+' file'+(changed.length>1?'s':'')+' changed':'unchanged this step';
+  const tab=tabs.find(t=>t.id===selDoc);
+  if(chips.length===0||true) changed.forEach(id=>{ const t=tabs.find(x=>x.id===id); chips.push(['chg',t.label+' changed']); });
+  if(tab.kind==='adr'){
+    const n=tab.id.slice(3), cur=adrBlocks(st.adrs[n]), pv=prevS.adrs[n]?adrBlocks(prevS.adrs[n]):[];
+    const pm=new Map(pv.map(b=>[b.key,b.html]));
+    body.innerHTML=cur.map(b=>{ const ch=!first&&pm.get(b.key)!==b.html; return '<div class="blk'+(ch?' chg':'')+'">'+(ch&&b.item?'<span class="tag-new">NEW</span>':'')+b.html+'</div>'; }).join('');
+  } else {
+    body.innerHTML=diffView(st.docs[tab.id], first?st.docs[tab.id]:(prevS.docs[tab.id]||''), tab.id, false, !!(prevS.docs[tab.id]!==undefined||first), tab.id.endsWith('.md')||tab.id.endsWith('.mdc')).html;
+  }
+  if(tab.kind==='adr') scrollToChange($('docs'),'.blk.chg',12); else scrollToChange($('docs'),'.ln.add,.ln.del',40);
+}
+function diffView(cur,prev,name,showNo,hasPrev,isMd,costLabel){
+  const a=prev===''?[]:splitLines(prev), b=splitLines(cur); const rows=(prev===cur)?b.map(s=>({t:'same',s})):lcsDiff(a,b);
+  let no=0, add=0, del=0;
+  const html=rows.map(r=>{ if(r.t!=='del') no++; if(r.t==='add') add++; if(r.t==='del') del++;
+    const cost=COST.test(r.s); const s=r.s.replace(COST,'');
+    const code=isMd?hlMd(s):hlPy(s);
+    return '<div class="ln '+r.t+(cost?' cost':'')+'"><span class="no">'+(r.t==='del'?'':no)+'</span><span class="mk">'+(r.t==='add'?'+':r.t==='del'?'−':'')+'</span><code>'+(code||' ')+'</code>'+(cost?'<span class="ct">'+esc(costLabel||'A-only')+'</span>':'')+'</div>'; }).join('');
+  return {html,add,del};
+}
+function renderCode(st,prevS,step,first,chips){
+  const names=Object.keys(st.files); const wrap=$('codetabs'), body=$('code');
+  const info={}; names.forEach(n=>{ const isNew=!first&&prevS.files[n]===undefined; const ch=!first&&prevS.files[n]!==st.files[n]; info[n]={isNew,ch}; });
+  const changed=names.filter(n=>info[n].ch);
+  if(lastKey!==mode+idx||!names.includes(selCode)){ const costF=names.find(n=>countCost({x:st.files[n]})>0); selCode=changed.length?changed[0]:(costF||(names.includes(selCode)?selCode:names[0])); }
+  wrap.innerHTML=names.map(n=>'<button class="tab" role="tab" data-id="'+n+'" aria-selected="'+(n===selCode)+'">'+esc(n)+(info[n].ch?'<span class="u" title="'+(info[n].isNew?'new':'changed')+'"></span>':'')+'</button>').join('');
+  wrap.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{selCode=b.dataset.id; renderCode(st,prevS,step,first,[]);});
+  const M=MODES[mode];
+  /* chips for all changed files */
+  if(chips) names.forEach(n=>{ if(info[n].ch){ const d=diffView(st.files[n],info[n].isNew?'':prevS.files[n],n,true,true,false,''); chips.push([d.del&&!d.add?'del':'add',n+' '+(d.add?'+'+d.add:'')+(d.add&&d.del?' ':'')+(d.del?'−'+d.del:'')]); } });
+  const f=st.files[selCode];
+  const d=diffView(f, first||prevS.files[selCode]===undefined?(first?f:''):prevS.files[selCode], selCode, true, true, false, mode==='bad'?'workaround':'A-only');
+  const label=info[selCode].isNew?'new file':(info[selCode].ch?'changed':'unchanged');
+  body.innerHTML='<div class="fh"><span>'+esc(selCode)+' · '+label+'</span><span>'+(d.add?'<span class="a">+'+d.add+'</span> ':'')+(d.del?'<span class="d">−'+d.del+'</span>':'')+'</span></div>'+d.html;
+  scrollToChange(body,body.querySelector('.ln.add,.ln.del')?'.ln.add,.ln.del':'.ln.cost',60);
+  const c=countCost(st.files), pc=countCost(prevS.files), max=14;
+  $('meter').innerHTML='<span title="'+esc(M.hint)+'">'+esc(M.label)+'</span><div class="bar"><i style="width:'+Math.min(100,c/max*100)+'%"></i></div><b>'+c+'</b>'+(!first&&c!==pc?'<span style="color:'+(c>pc?'var(--amber)':'var(--green)')+'">'+(c>pc?'▲ +':'▼ −')+Math.abs(c-pc)+'</span>':'');
+  const T=step.tests; const te=$('tests'); if(T){ te.className='tests '+T[1]; te.textContent=T[0]; te.style.display=''; } else te.style.display='none';
+  $('codesub').textContent=names.length?names.length+' file'+(names.length>1?'s':''):'';
+  $('codeveil').style.display=step.veilCode?'flex':'none'; $('docveil').style.display='none';
+}
+
+/* ---------- wiring ---------- */
+document.addEventListener('keydown',e=>{
+  if(e.target.closest&&e.target.closest('input,textarea')) return;
+  if(e.key==='ArrowRight'||e.key==='PageDown'){ e.preventDefault(); go(idx+1); }
+  else if(e.key==='ArrowLeft'||e.key==='PageUp'){ e.preventDefault(); go(idx-1); }
+  else if(e.key==='Home'){ go(0); } else if(e.key==='End'){ go(MODES[mode].steps.length-1); }
+});
+$('prev').onclick=()=>go(idx-1); $('next').onclick=()=>go(idx+1);
+document.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+window.addEventListener('hashchange',()=>{ const o=mode+idx; parseHash(); if(mode+idx!==o) render(); });
+parseHash(); render();
+
+</script>
+</body>
+</html>
